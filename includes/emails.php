@@ -3,195 +3,280 @@ if (!defined('ABSPATH')) exit;
 
 class MLF_Emails {
 
-    public function __construct(){
-
-        add_action('mylisting/submission/save-listing-data', [$this,'admin_email'],10,2);
-        add_action('transition_post_status', [$this,'status_change'],10,3);
+    public function __construct() {
+        // MyListing passes ($post_id, $listing_object) — accept both params
+        add_action('mylisting/submission/save-listing-data', [$this, 'admin_email'], 10, 2);
+        add_action('transition_post_status', [$this, 'status_change'], 10, 3);
     }
 
-    // Helper function to decode serialized PHP data
-    function mlf_decode_value($value) {
+    // ── Decode serialized/JSON meta values ────────────────────────────────────
+    private function mlf_decode_value($value, $key = '') {
         if (empty($value) && $value !== '0' && $value !== 0) {
             return $value;
         }
-        
-        // Convert 0/1 to Yes/No
-        if ($value === '1' || $value === 1 || $value === 'true') {
-            return 'Yes';
-        }
-        if ($value === '0' || $value === 0 || $value === 'false') {
-            return 'No';
-        }
-        
-        // Check if it looks like serialized PHP array (a:...)
+
+        if ($value === '1' || $value === 1 || $value === 'true')  return 'Yes';
+        if ($value === '0' || $value === 0 || $value === 'false') return 'No';
+
+        // Try unserialize (PHP serialized arrays)
+        $decoded = null;
         if (is_string($value) && preg_match('/^a:\d+:/', $value)) {
             $decoded = @unserialize($value);
-            if ($decoded !== false) {
-                // Check if it's a simple indexed array (select field values)
-                $is_indexed = true;
-                $keys = array_keys($decoded);
-                for ($i = 0; $i < count($keys); $i++) {
-                    if ($keys[$i] !== $i) {
-                        $is_indexed = false;
-                        break;
-                    }
-                }
-                
-                // If it's a simple indexed array with string values, return the values
-                if ($is_indexed && !empty($decoded)) {
-                    $values = array_values($decoded);
-                    if (count($values) === 1) {
-                        return $values[0];
-                    }
-                    return implode(", ", $values);
-                }
-            }
         }
-        
+
+        // Try JSON
+        if ($decoded === null && is_string($value)) {
+            $decoded = json_decode($value, true);
+        }
+
+        if ($decoded !== null && $decoded !== false && is_array($decoded)) {
+
+            // ── Work Hours (MyListing nested format) ───────────────────────
+            // MyListing stores: ['monday' => ['status' => 'enter-hours', 'hours' => [['from'=>'09:00','to'=>'17:00']]]]
+            $first = reset($decoded);
+            if (is_array($first) && isset($first['status'])) {
+                $output = [];
+                foreach ($decoded as $day => $data) {
+                    if (!is_array($data)) continue;
+
+                    $status = $data['status'] ?? '';
+
+                    switch ($status) {
+                        case 'by-appointment-only':
+                            $output[] = ucfirst($day) . ': By Appointment Only';
+                            break;
+
+                        case 'enter-hours':
+                            // Try nested hours array first (MyListing default)
+                            $from = '';
+                            $to   = '';
+                            if (!empty($data['hours']) && is_array($data['hours'])) {
+                                $slot = $data['hours'][0] ?? [];
+                                $from = $slot['from'] ?? '';
+                                $to   = $slot['to']   ?? '';
+                            }
+                            // Fall back to top-level from/to (legacy format)
+                            if (empty($from)) {
+                                $from = $data['from'] ?? '';
+                                $to   = $data['to']   ?? '';
+                            }
+
+                            if ($from && $to) {
+                                $output[] = ucfirst($day) . ': ' . $from . ' – ' . $to;
+                            } elseif ($from) {
+                                $output[] = ucfirst($day) . ': From ' . $from;
+                            } else {
+                                $output[] = ucfirst($day) . ': Hours not set';
+                            }
+                            break;
+
+                        case 'closed':
+                            $output[] = ucfirst($day) . ': Closed';
+                            break;
+
+                        default:
+                            if ($status) {
+                                $output[] = ucfirst($day) . ': ' . ucfirst(str_replace('-', ' ', $status));
+                            }
+                    }
+                }
+                return implode("\n", $output);
+            }
+
+            // ── Social links (links field) ─────────────────────────────────
+            if (
+                isset($decoded[0]) &&
+                is_array($decoded[0]) &&
+                (isset($decoded[0]['network']) || isset($decoded[0]['key']))
+            ) {
+                $output = [];
+                foreach ($decoded as $item) {
+                    $network = $item['network'] ?? $item['key'] ?? '';
+                    $url     = $item['url']     ?? '';
+
+                    if (is_array($network)) $network = $network['value'] ?? $network['key'] ?? reset($network);
+                    if (is_array($url))     $url     = $url['url'] ?? reset($url);
+
+                    $network = trim((string) $network);
+                    $url     = trim((string) $url);
+
+                    if (empty($network) && empty($url)) continue;
+
+                    if ($key === 'links') {
+                        // Return raw format for JS renderer
+                        if (!empty($url)) {
+                            $output[] = strtolower($network) . ':' . $url;
+                        } elseif (!empty($network)) {
+                            $output[] = $network;
+                        }
+                    } else {
+                        $url = str_replace(['"', "'"], '', $url);
+                        if (!empty($url) && filter_var($url, FILTER_VALIDATE_URL)) {
+                            $output[] = '<a href="' . esc_url($url) . '" target="_blank" rel="noopener noreferrer">' . esc_html(ucfirst($network)) . '</a>';
+                        } elseif (!empty($network)) {
+                            $output[] = esc_html(ucfirst($network));
+                        }
+                    }
+                }
+                return ($key === 'links') ? $output : implode('<br>', $output);
+            }
+
+            // ── Simple indexed array ───────────────────────────────────────
+            if (array_keys($decoded) === range(0, count($decoded) - 1)) {
+                $values = array_values($decoded);
+                return count($values) === 1 ? $values[0] : implode(', ', $values);
+            }
+
+            // ── Fallback: JSON-encode ──────────────────────────────────────
+            return json_encode($decoded);
+        }
+
         return $value;
     }
-    
-    // ADMIN NOTIFICATION - Enhanced with full form data
-    public function admin_email($id){
 
+    // ── Admin notification on new listing ─────────────────────────────────────
+    // Accept second param ($listing) even though we don't use it — avoids PHP warnings
+    public function admin_email($id, $listing = null) {
         $post = get_post($id);
+        if (!$post) return;
+
         $meta = get_post_meta($id);
-        
-        // Build HTML email with form data
-        $html = '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">';
+
+        $html  = '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">';
         $html .= '<h2 style="color: #95160c;">🎉 New Listing Submitted</h2>';
         $html .= '<div style="background: #f5f5f5; padding: 20px; border-radius: 8px;">';
-        $html .= '<h3 style="margin-top: 0;">' . get_the_title($id) . '</h3>';
+        $html .= '<h3 style="margin-top: 0;">' . esc_html(get_the_title($id)) . '</h3>';
         $html .= '<p><strong>Status:</strong> ' . ucfirst($post->post_status) . '</p>';
         $html .= '<p><strong>Submitted:</strong> ' . get_the_date('F j, Y g:i A', $id) . '</p>';
         $html .= '</div>';
-        
-        // Add key form fields
+
+        // Key fields to include in admin notification
+        // job_email is the correct slug per the config JSON
         $key_fields = [
-            'email' => 'Email',
-            'phone' => 'Phone',
-            'complete-address' => 'Address',
-            'credentials' => 'Credentials',
+            'job_email'       => 'Email',
+            'job_phone'       => 'Phone',
+            'complete-address'=> 'Address',
+            'credentials'     => 'Credentials',
             'certifying-body' => 'Certifying Body',
-            'my-style-of-practice' => 'Style of Practice',
-            'basic-information' => 'Basic Information',
-            'the-why' => 'The Why',
-            'your-focus' => 'Focus',
-            'formal-bio' => 'Bio'
+            'job_description' => 'Description of Healthcare Approach',
+            'the-why'         => 'The Why',
+            'your-focus'      => 'Focus',
+            'formal-bio'      => 'Bio',
         ];
-        
+
         $has_fields = false;
-        foreach($key_fields as $key => $label) {
-            if(!empty($meta[$key][0])) {
-                if(!$has_fields) {
+        foreach ($key_fields as $key => $label) {
+            $raw = $meta[$key][0] ?? '';
+            if (!empty($raw)) {
+                if (!$has_fields) {
                     $html .= '<h4 style="margin-top: 20px;">Key Details:</h4>';
                     $html .= '<table style="width: 100%; border-collapse: collapse;">';
                     $has_fields = true;
                 }
-                $decoded_value = $this->mlf_decode_value($meta[$key][0]);
-                $html .= '<tr><td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>' . $label . ':</strong></td>';
-                $html .= '<td style="padding: 8px 0; border-bottom: 1px solid #eee;">' . esc_html($decoded_value) . '</td></tr>';
+                $decoded = $this->mlf_decode_value($raw, $key);
+                if (is_array($decoded)) $decoded = implode(', ', $decoded);
+                $html .= '<tr>';
+                $html .= '<td style="padding: 8px 0; border-bottom: 1px solid #eee; width: 35%;"><strong>' . esc_html($label) . ':</strong></td>';
+                $html .= '<td style="padding: 8px 0; border-bottom: 1px solid #eee;">' . nl2br(esc_html($decoded)) . '</td>';
+                $html .= '</tr>';
             }
         }
-        
-        if($has_fields) {
+        if ($has_fields) {
             $html .= '</table>';
         }
-        
-        $html .= '<p style="margin-top: 20px;"><a href="' . admin_url('post.php?post=' . $id . '&action=edit') . '" style="background: #95160c; color: #fff; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Full Listing</a></p>';
+
+        $html .= '<p style="margin-top: 20px;">';
+        $html .= '<a href="' . admin_url('post.php?post=' . $id . '&action=edit') . '" style="background: #95160c; color: #fff; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Full Listing in Admin</a>';
+        $html .= '</p>';
         $html .= '</div>';
-        
-        $to = get_option('mlf_email_admin', 'esther@myndmyself.com');
-        $subject = 'New Listing: ' . get_the_title($id);
-        
+
+        $to      = get_option('mlf_email_admin', get_bloginfo('admin_email'));
+        $subject = 'New Listing Submitted: ' . get_the_title($id);
         $headers = [
             'Content-Type: text/html; charset=UTF-8',
-            'From: ' . get_bloginfo('name') . ' <' . get_bloginfo('admin_email') . '>'
+            'From: ' . get_bloginfo('name') . ' <' . get_bloginfo('admin_email') . '>',
         ];
-        
-        wp_mail($to, $subject, $html, $headers);
+
+        $sent = wp_mail($to, $subject, $html, $headers);
+        error_log(sprintf('MLF Emails: admin notification for post %d sent=%s to=%s', $id, $sent ? 'yes' : 'no', $to));
     }
 
-    // STATUS CHANGE EMAILS
-    public function status_change($new_status, $old_status, $post){
+    // ── User email on status change ───────────────────────────────────────────
+    public function status_change($new_status, $old_status, $post) {
+        // Skip if status hasn't actually changed
+        if ($new_status === $old_status) return;
 
-        if($new_status === $old_status) {
-            error_log(sprintf('MLF Emails: skipped post %d, status unchanged (%s).', $post->ID, $old_status));
-            return;
-        }
+        // Only handle job listings
+        if ($post->post_type !== 'job_listing') return;
 
-        if($post->post_type !== 'job_listing') {
-            return;
-        }
+        error_log(sprintf('MLF Emails: transition %s → %s for post %d', $old_status, $new_status, $post->ID));
 
-        error_log(sprintf('MLF Emails: STATUS CHANGE: %s → %s for post %d', $old_status, $new_status, $post->ID));
-
-        $template = '';
-        $subject = '';
+        $template   = '';
+        $subject    = '';
         $email_type = '';
 
+        // Approved: any status → publish
         if ($new_status === 'publish' && $old_status !== 'publish') {
-            $template = get_option('mlf_email_approved',
-                '<h2>Your Listing Has Been Approved</h2><p>Your listing <strong>{{listing_title}}</strong> has been approved and is now live.</p>'
-            );
-            $subject = get_option('mlf_email_approved_subject', 'Listing Approved');
+            $template   = get_option('mlf_email_approved', '<h2>Your Listing Has Been Approved</h2><p>Your listing <strong>{{listing_title}}</strong> is now live.</p>');
+            $subject    = get_option('mlf_email_approved_subject', 'Your Listing Has Been Approved');
             $email_type = 'approval';
         }
 
-        if ($new_status === 'draft' && $old_status !== 'draft') {
-            $template = get_option('mlf_email_rejected',
-                '<h2>Listing Status Update</h2><p>Your listing <strong>{{listing_title}}</strong> requires revision and has not been approved at this time.</p>'
-            );
-            $subject = get_option('mlf_email_rejected_subject', 'Listing Rejected');
+        // Rejected: pending → draft  (only from pending, to avoid firing on normal drafts)
+        if ($new_status === 'draft' && $old_status === 'pending') {
+            $template   = get_option('mlf_email_rejected', '<h2>Listing Status Update</h2><p>Your listing <strong>{{listing_title}}</strong> requires revision and has not been approved at this time.</p>');
+            $subject    = get_option('mlf_email_rejected_subject', 'Update on Your Listing Submission');
             $email_type = 'rejection';
         }
 
-        if (!$template) {
-            error_log(sprintf('MLF Emails: ignored post %d transition from %s to %s.', $post->ID, $old_status, $new_status));
-            return;
-        }
+        if (!$template) return;
 
         $email = $this->get_listing_owner_email($post->ID);
-        error_log(sprintf('MLF Emails: EMAIL: %s for post %d', $email, $post->ID));
+        error_log(sprintf('MLF Emails: resolved email=%s for post %d', $email, $post->ID));
 
         if (empty($email) || !is_email($email)) {
-            error_log(sprintf('MLF Emails: aborting delivery for post %d, invalid email: %s', $post->ID, $email));
+            error_log(sprintf('MLF Emails: aborting — invalid email "%s" for post %d', $email, $post->ID));
             return;
         }
 
-        $body = $this->process_email_template($template, $post);
-        $subject = $this->process_email_template($subject, $post);
-        $headers = ['Content-Type: text/html; charset=UTF-8'];
+        $body    = $this->process_template($template, $post);
+        $subject = $this->process_template($subject, $post);
+        $headers = [
+            'Content-Type: text/html; charset=UTF-8',
+            'From: ' . get_bloginfo('name') . ' <' . get_bloginfo('admin_email') . '>',
+        ];
 
-        wp_mail($email, $subject, $body, $headers);
-        error_log(sprintf('MLF Emails: sent %s email for post %d to %s.', $email_type ?: 'status change', $post->ID, $email));
+        $sent = wp_mail($email, $subject, $body, $headers);
+        error_log(sprintf('MLF Emails: %s email for post %d sent=%s to=%s', $email_type, $post->ID, $sent ? 'yes' : 'no', $email));
     }
 
+    // ── Resolve the listing owner's email ────────────────────────────────────
     private function get_listing_owner_email($post_id) {
-        // Prefer the job-specific submitter email field, then fall back to the generic listing email.
-        $keys = ['_job_email', 'email', '_email'];
-
-        foreach($keys as $key) {
+        // Check meta keys in priority order (job_email is the slug in the config)
+        foreach (['job_email', 'email', '_email'] as $key) {
             $value = trim((string) get_post_meta($post_id, $key, true));
-            if ($value !== '') {
+            if ($value !== '' && is_email($value)) {
                 return $value;
             }
         }
 
+        // Fall back to post author's email
         $post = get_post($post_id);
         if ($post && $post->post_author) {
-            return get_the_author_meta('_job_email', $post->post_author);
+            $author_email = get_the_author_meta('user_email', $post->post_author);
+            if (is_email($author_email)) return $author_email;
         }
 
         return '';
     }
 
-    private function process_email_template($template, $post) {
-        $replacements = [
-            '{{listing_title}}' => $post->post_title,
-        ];
-
-        return str_replace(array_keys($replacements), array_values($replacements), $template);
+    // ── Replace template placeholders ─────────────────────────────────────────
+    private function process_template($template, $post) {
+        return str_replace(
+            ['{{listing_title}}', '{{listing_id}}'],
+            [$post->post_title, $post->ID],
+            $template
+        );
     }
 }
 

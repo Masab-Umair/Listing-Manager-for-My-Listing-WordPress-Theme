@@ -247,8 +247,30 @@ foreach ($decoded as $day => $data) {
 
     if (is_array($data) && isset($data['status'])) {
         $status = $data['status'];
-        $from   = isset($data['from']) ? trim((string) $data['from']) : '';
-        $to     = isset($data['to'])   ? trim((string) $data['to'])   : '';
+// MyListing stores hours nested: ['hours' => [['from'=>'09:00','to'=>'17:00']]]
+$from = '';
+$to   = '';
+if (!empty($data['hours']) && is_array($data['hours'])) {
+    $slot = reset($data['hours']);
+    $from = isset($slot['from']) ? $slot['from'] : '';
+    $to   = isset($slot['to'])   ? $slot['to']   : '';
+}
+// fallback to flat format
+if (empty($from)) {
+// MyListing stores hours nested: ['hours' => [['from'=>'09:00','to'=>'17:00']]]
+$from = '';
+$to   = '';
+if (!empty($data['hours']) && is_array($data['hours'])) {
+    $slot = reset($data['hours']);
+    $from = isset($slot['from']) ? $slot['from'] : '';
+    $to   = isset($slot['to'])   ? $slot['to']   : '';
+}
+// fallback to flat format
+if (empty($from)) {
+    $from = isset($data['from']) ? $data['from'] : '';
+    $to   = isset($data['to'])   ? $data['to']   : '';
+}
+}
 
         $status_text = '';
         switch ($status) {
