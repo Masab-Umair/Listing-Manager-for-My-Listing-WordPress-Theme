@@ -47,28 +47,25 @@ class MLF_Emails {
                             break;
 
                         case 'enter-hours':
-                            // Try nested hours array first (MyListing default)
-                            $from = '';
-                            $to   = '';
-                            if (!empty($data['hours']) && is_array($data['hours'])) {
-                                $slot = $data['hours'][0] ?? [];
-                                $from = $slot['from'] ?? '';
-                                $to   = $slot['to']   ?? '';
-                            }
-                            // Fall back to top-level from/to (legacy format)
-                            if (empty($from)) {
-                                $from = $data['from'] ?? '';
-                                $to   = $data['to']   ?? '';
-                            }
-
-                            if ($from && $to) {
-                                $output[] = ucfirst($day) . ': ' . $from . ' – ' . $to;
-                            } elseif ($from) {
-                                $output[] = ucfirst($day) . ': From ' . $from;
-                            } else {
-                                $output[] = ucfirst($day) . ': Hours not set';
-                            }
-                            break;
+                        // MyListing stores times in a nested hours array
+                        if (!empty($data['hours']) && is_array($data['hours'])) {
+                            $slot = reset($data['hours']);
+                            $from = $slot['from'] ?? '';
+                            $to   = $slot['to']   ?? '';
+                        }
+                        // fallback to flat format
+                        if (empty($from)) {
+                            $from = $data['from'] ?? '';
+                            $to   = $data['to']   ?? '';
+                        }
+                        if ($from && $to) {
+                            $status_text = $from . ' – ' . $to;
+                        } elseif ($from) {
+                            $status_text = 'From ' . $from;
+                        } else {
+                            $status_text = 'Hours not set';
+                        }
+                        break;
 
                         case 'closed':
                             $output[] = ucfirst($day) . ': Closed';
