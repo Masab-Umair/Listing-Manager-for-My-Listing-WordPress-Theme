@@ -169,7 +169,7 @@ class MLF_Emails {
 
     private function get_listing_owner_email($post_id) {
         // Prefer the job-specific submitter email field, then fall back to the generic listing email.
-        $keys = ['job_email', 'email', '_email'];
+        $keys = ['user_email', 'email', '_email'];
 
         foreach($keys as $key) {
             $value = trim((string) get_post_meta($post_id, $key, true));
@@ -180,7 +180,7 @@ class MLF_Emails {
 
         $post = get_post($post_id);
         if ($post && $post->post_author) {
-            return get_the_author_meta('job_email', $post->post_author);
+            return get_the_author_meta('user_email', $post->post_author);
         }
 
         return '';
