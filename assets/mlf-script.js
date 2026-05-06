@@ -7,6 +7,10 @@
  * Render a field value: images → <img>, URLs → <a>, multiline → <br> separated
  */
 function mlfRenderValue(key, value) {
+    // work_hours arrives pre-rendered with HTML from PHP
+    if (key === 'work_hours') {
+        return value || '';
+    }
     var socialIcon=function(name){name=(name||'').toLowerCase(); var map={facebook:'bi bi-facebook',instagram:'bi bi-instagram',youtube:'bi bi-youtube',linkedin:'bi bi-linkedin',twitter:'bi bi-twitter-x',x:'bi bi-twitter-x',tiktok:'bi bi-tiktok',website:'bi bi-globe'}; return map[name]||'bi bi-link-45deg';};
     if (!value) return '';
     var html = '';

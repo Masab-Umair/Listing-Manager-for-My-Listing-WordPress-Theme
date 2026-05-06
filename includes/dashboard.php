@@ -163,6 +163,7 @@ class MLF_Dashboard {
     }
     
     public function ajax(){
+        check_ajax_referer('mlf_nonce', 'nonce');
         $id = intval($_POST['id']);
         $type = sanitize_text_field($_POST['type']);
         
@@ -235,42 +236,61 @@ class MLF_Dashboard {
                         return implode(", ", $values);
                     }
                     
-                    // Format the decoded array into readable text
-                    $output = [];
-                    foreach ($decoded as $day => $data) {
-                        if (is_array($data) && isset($data['status'])) {
-                            $status = $data['status'];
-                            $from = isset($data['from']) ? $data['from'] : '';
-                            $to   = isset($data['to'])   ? $data['to']   : '';
-                            
-                            // Make status human readable
-                            $status_text = '';
-                            switch ($status) {
-                                case 'by-appointment-only':
-                                    $status_text = 'By Appointment Only';
-                                    break;
-                                case 'enter-hours':
-                                    if ($from && $to) {
-                                        $status_text = $from . ' – ' . $to;
-                                    } elseif ($from) {
-                                        $status_text = 'From ' . $from;
-                                    } else {
-                                        $status_text = 'Hours not set';
-                                    }
-                                    break;
-                                case 'closed':
-                                    $status_text = 'Closed';
-                                    break;
-                                default:
-                                    $status_text = ucfirst(str_replace('-', ' ', $status));
-                            }
-                            
-                            $output[] = "$day: $status_text";
-                        } else {
-                            $output[] = "$day: " . (is_array($data) ? json_encode($data) : $data);
-                        }
-                    }
-                    return implode("\n", $output);
+                    // Format the decoded array into readable text (work hours, etc.)
+$output = [];
+foreach ($decoded as $day => $data) {
+
+    // Skip the timezone entry — it's a string, not a day array
+    if ($day === 'timezone') {
+        continue;
+    }
+
+    if (is_array($data) && isset($data['status'])) {
+        $status = $data['status'];
+        $from   = isset($data['from']) ? trim((string) $data['from']) : '';
+        $to     = isset($data['to'])   ? trim((string) $data['to'])   : '';
+
+        $status_text = '';
+        switch ($status) {
+            case 'by-appointment-only':
+                $status_text = 'By Appointment Only';
+                break;
+
+            // MyListing uses both 'enter-hours' and 'open' for time ranges
+            case 'enter-hours':
+            case 'open':
+                if ($from !== '' && $to !== '') {
+                    $status_text = $from . ' – ' . $to;
+                } elseif ($from !== '') {
+                    $status_text = 'From ' . $from;
+                } elseif ($to !== '') {
+                    $status_text = 'Until ' . $to;
+                } else {
+                    $status_text = 'Hours not set';
+                }
+                break;
+
+            case 'closed':
+                $status_text = 'Closed';
+                break;
+
+            default:
+                // Handles any other statuses gracefully
+                $status_text = ucfirst(str_replace('-', ' ', $status));
+                if ($from !== '' && $to !== '') {
+                    $status_text .= ' (' . $from . ' – ' . $to . ')';
+                }
+        }
+
+        $day_label = ucfirst($day);
+        $output[] = "<strong>{$day_label}:</strong> {$status_text}";
+
+    } else {
+        // Non-array entry (shouldn't happen after timezone skip, but safe fallback)
+        $output[] = ucfirst($day) . ': ' . (is_array($data) ? json_encode($data) : $data);
+    }
+}
+return implode('<br>', $output);
                 }
             }
             

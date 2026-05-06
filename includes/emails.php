@@ -169,7 +169,7 @@ class MLF_Emails {
 
     private function get_listing_owner_email($post_id) {
         // Prefer the job-specific submitter email field, then fall back to the generic listing email.
-        $keys = ['user_email', 'email', '_email'];
+        $keys = ['_job_email', 'email', '_email'];
 
         foreach($keys as $key) {
             $value = trim((string) get_post_meta($post_id, $key, true));
@@ -180,7 +180,7 @@ class MLF_Emails {
 
         $post = get_post($post_id);
         if ($post && $post->post_author) {
-            return get_the_author_meta('user_email', $post->post_author);
+            return get_the_author_meta('_job_email', $post->post_author);
         }
 
         return '';
@@ -192,25 +192,6 @@ class MLF_Emails {
         ];
 
         return str_replace(array_keys($replacements), array_values($replacements), $template);
-    }
-}
-
-add_action('transition_post_status', 'mlf_force_reject_to_draft', 9, 3);
-
-function mlf_force_reject_to_draft($new_status, $old_status, $post) {
-
-    if ($post->post_type !== 'job_listing') {
-        return;
-    }
-
-    if ($old_status === 'pending' && $new_status === 'draft') {
-
-        remove_action('transition_post_status', 'mlf_force_reject_to_draft', 9);
-
-        wp_update_post([
-            'ID' => $post->ID,
-            'post_status' => 'draft'
-        ]);
     }
 }
 
