@@ -33,48 +33,61 @@ class MLF_Emails {
 
             // ── Work Hours (MyListing nested format) ───────────────────────
             // MyListing stores: ['monday' => ['status' => 'enter-hours', 'hours' => [['from'=>'09:00','to'=>'17:00']]]]
+            // Or: ['monday' => ['status' => 'enter-hours', 'from'=>'09:00', 'to'=>'17:00']]
+            // Or: ['monday' => ['from'=>'09:00', 'to'=>'17:00']]
             $first = reset($decoded);
-            if (is_array($first) && isset($first['status'])) {
+            if (is_array($first) && (isset($first['status']) || isset($first['from']) || isset($first['hours']))) {
                 $output = [];
                 foreach ($decoded as $day => $data) {
                     if (!is_array($data)) continue;
 
                     $status = $data['status'] ?? '';
+                    $from = '';
+                    $to = '';
 
                     switch ($status) {
                         case 'by-appointment-only':
                             $output[] = ucfirst($day) . ': By Appointment Only';
-                            break;
+                            continue 2;
 
                         case 'enter-hours':
-                        // MyListing stores times in a nested hours array
-                        if (!empty($data['hours']) && is_array($data['hours'])) {
-                            $slot = reset($data['hours']);
-                            $from = $slot['from'] ?? '';
-                            $to   = $slot['to']   ?? '';
-                        }
-                        // fallback to flat format
-                        if (empty($from)) {
-                            $from = $data['from'] ?? '';
-                            $to   = $data['to']   ?? '';
-                        }
-                        if ($from && $to) {
-                            $status_text = $from . ' – ' . $to;
-                        } elseif ($from) {
-                            $status_text = 'From ' . $from;
-                        } else {
-                            $status_text = 'Hours not set';
-                        }
-                        break;
+                            // MyListing stores times in a nested hours array
+                            if (!empty($data['hours']) && is_array($data['hours'])) {
+                                $slot = reset($data['hours']);
+                                $from = $slot['from'] ?? '';
+                                $to   = $slot['to']   ?? '';
+                            }
+                            // fallback to flat format within enter-hours
+                            if (empty($from)) {
+                                $from = $data['from'] ?? '';
+                                $to   = $data['to']   ?? '';
+                            }
+                            break;
 
                         case 'closed':
                             $output[] = ucfirst($day) . ': Closed';
-                            break;
+                            continue 2;
 
                         default:
-                            if ($status) {
-                                $output[] = ucfirst($day) . ': ' . ucfirst(str_replace('-', ' ', $status));
-                            }
+                            // No status or unknown status - check for direct from/to fields
+                            $from = $data['from'] ?? '';
+                            $to   = $data['to']   ?? '';
+                            break;
+                    }
+
+                    // Format the time range
+                    if ($from && $to) {
+                        // Convert to 12-hour format with AM/PM
+                        $from_time = date('g:i A', strtotime($from));
+                        $to_time = date('g:i A', strtotime($to));
+                        $output[] = ucfirst($day) . ': ' . $from_time . ' - ' . $to_time;
+                    } elseif ($from) {
+                        $from_time = date('g:i A', strtotime($from));
+                        $output[] = ucfirst($day) . ': From ' . $from_time;
+                    } elseif ($status) {
+                        $output[] = ucfirst($day) . ': ' . ucfirst(str_replace('-', ' ', $status));
+                    } else {
+                        $output[] = ucfirst($day) . ': Hours not set';
                     }
                 }
                 return implode("\n", $output);
@@ -137,15 +150,42 @@ class MLF_Emails {
         $post = get_post($id);
         if (!$post) return;
 
-        $meta = get_post_meta($id);
+        // Get customizable template or fallback to default
+        $template = get_option('mlf_email_new_listing', $this->get_default_new_listing_template());
+        $subject  = get_option('mlf_email_new_listing_subject', 'New Listing Submitted: {{listing_title}}');
 
-        $html  = '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">';
-        $html .= '<h2 style="color: #95160c;">🎉 New Listing Submitted</h2>';
-        $html .= '<div style="background: #f5f5f5; padding: 20px; border-radius: 8px;">';
-        $html .= '<h3 style="margin-top: 0;">' . esc_html(get_the_title($id)) . '</h3>';
-        $html .= '<p><strong>Status:</strong> ' . ucfirst($post->post_status) . '</p>';
-        $html .= '<p><strong>Submitted:</strong> ' . get_the_date('F j, Y g:i A', $id) . '</p>';
-        $html .= '</div>';
+        // Process template and subject with available placeholders
+        $subject = $this->process_template($subject, $post);
+        $body = $this->process_new_listing_template($template, $post);
+
+        $to      = get_option('mlf_email_admin', get_bloginfo('admin_email'));
+        $headers = [
+            'Content-Type: text/html; charset=UTF-8',
+            'From: ' . get_bloginfo('name') . ' <' . get_bloginfo('admin_email') . '>',
+        ];
+
+        $sent = wp_mail($to, $subject, $body, $headers);
+        error_log(sprintf('MLF Emails: admin notification for post %d sent=%s to=%s', $id, $sent ? 'yes' : 'no', $to));
+    }
+
+    // ── Get default new listing email template ────────────────────────────────
+    private function get_default_new_listing_template() {
+        return '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">' .
+               '<h2 style="color: #95160c;">🎉 New Listing Submitted</h2>' .
+               '<div style="background: #f5f5f5; padding: 20px; border-radius: 8px;">' .
+               '<h3 style="margin-top: 0;">{{listing_title}}</h3>' .
+               '<p><strong>Status:</strong> {{listing_status}}</p>' .
+               '<p><strong>Submitted:</strong> {{listing_date}}</p>' .
+               '</div>' .
+               '<p style="margin-top: 20px;">' .
+               '<a href="{{admin_link}}" style="background: #95160c; color: #fff; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Full Listing in Admin</a>' .
+               '</p>' .
+               '</div>';
+    }
+
+    // ── Process new listing email template with placeholders ──────────────────
+    private function process_new_listing_template($template, $post) {
+        $meta = get_post_meta($post->ID);
 
         // Key fields to include in admin notification
         // job_email is the correct slug per the config JSON
@@ -155,47 +195,47 @@ class MLF_Emails {
             'complete-address'=> 'Address',
             'credentials'     => 'Credentials',
             'certifying-body' => 'Certifying Body',
+            'work_hours'      => 'Work Hours',
             'job_description' => 'Description of Healthcare Approach',
             'the-why'         => 'The Why',
             'your-focus'      => 'Focus',
             'formal-bio'      => 'Bio',
         ];
 
+        // Build key details table
+        $key_details_html = '';
         $has_fields = false;
         foreach ($key_fields as $key => $label) {
             $raw = $meta[$key][0] ?? '';
             if (!empty($raw)) {
                 if (!$has_fields) {
-                    $html .= '<h4 style="margin-top: 20px;">Key Details:</h4>';
-                    $html .= '<table style="width: 100%; border-collapse: collapse;">';
+                    $key_details_html .= '<h4 style="margin-top: 20px;">Key Details:</h4>';
+                    $key_details_html .= '<table style="width: 100%; border-collapse: collapse;">';
                     $has_fields = true;
                 }
                 $decoded = $this->mlf_decode_value($raw, $key);
                 if (is_array($decoded)) $decoded = implode(', ', $decoded);
-                $html .= '<tr>';
-                $html .= '<td style="padding: 8px 0; border-bottom: 1px solid #eee; width: 35%;"><strong>' . esc_html($label) . ':</strong></td>';
-                $html .= '<td style="padding: 8px 0; border-bottom: 1px solid #eee;">' . nl2br(esc_html($decoded)) . '</td>';
-                $html .= '</tr>';
+                $key_details_html .= '<tr>';
+                $key_details_html .= '<td style="padding: 8px 0; border-bottom: 1px solid #eee; width: 35%;"><strong>' . esc_html($label) . ':</strong></td>';
+                $key_details_html .= '<td style="padding: 8px 0; border-bottom: 1px solid #eee;">' . nl2br(esc_html($decoded)) . '</td>';
+                $key_details_html .= '</tr>';
             }
         }
         if ($has_fields) {
-            $html .= '</table>';
+            $key_details_html .= '</table>';
         }
 
-        $html .= '<p style="margin-top: 20px;">';
-        $html .= '<a href="' . admin_url('post.php?post=' . $id . '&action=edit') . '" style="background: #95160c; color: #fff; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Full Listing in Admin</a>';
-        $html .= '</p>';
-        $html .= '</div>';
-
-        $to      = get_option('mlf_email_admin', get_bloginfo('admin_email'));
-        $subject = 'New Listing Submitted: ' . get_the_title($id);
-        $headers = [
-            'Content-Type: text/html; charset=UTF-8',
-            'From: ' . get_bloginfo('name') . ' <' . get_bloginfo('admin_email') . '>',
+        // Replace standard placeholders
+        $replacements = [
+            '{{listing_title}}' => get_the_title($post->ID),
+            '{{listing_id}}' => $post->ID,
+            '{{listing_status}}' => ucfirst($post->post_status),
+            '{{listing_date}}' => get_the_date('F j, Y g:i A', $post->ID),
+            '{{admin_link}}' => admin_url('post.php?post=' . $post->ID . '&action=edit'),
+            '{{key_details}}' => $key_details_html,
         ];
 
-        $sent = wp_mail($to, $subject, $html, $headers);
-        error_log(sprintf('MLF Emails: admin notification for post %d sent=%s to=%s', $id, $sent ? 'yes' : 'no', $to));
+        return str_replace(array_keys($replacements), array_values($replacements), $template);
     }
 
     // ── User email on status change ───────────────────────────────────────────

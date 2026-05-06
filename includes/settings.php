@@ -79,6 +79,8 @@ class MLF_Settings {
     public function register(){
         // Email Settings
         register_setting('mlf_group','mlf_email_admin');
+        register_setting('mlf_group','mlf_email_new_listing');
+        register_setting('mlf_group','mlf_email_new_listing_subject');
         register_setting('mlf_group','mlf_email_approved');
         register_setting('mlf_group','mlf_email_approved_subject');
         register_setting('mlf_group','mlf_email_rejected');
@@ -265,6 +267,18 @@ class MLF_Settings {
                 <button type="button" id="mlf_send_test_email" onclick="mlfSendTestEmail()" style="background:#95160c;color:#fff;border:none;padding:10px 20px;border-radius:5px;cursor:pointer;font-size:14px;font-weight:600;white-space:nowrap;">📨 Send Test Email</button>
             </div>
             <div id="mlf_test_email_result" style="margin-top:10px;display:none;"></div>
+        </div>
+
+        <div class="mlf-form-group">
+            <label>New Listing Email Subject</label>
+            <input type="text" name="mlf_email_new_listing_subject" value="<?php echo esc_attr(get_option('mlf_email_new_listing_subject','New Listing Submitted: {{listing_title}}')); ?>" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:5px;font-size:14px;">
+            <small>Available placeholders: <code>{{listing_title}}</code>, <code>{{listing_id}}</code></small>
+        </div>
+
+        <div class="mlf-form-group">
+            <label>New Listing Email Template (HTML)</label>
+            <?php wp_editor(get_option('mlf_email_new_listing','<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;"><h2 style="color: #95160c;">🎉 New Listing Submitted</h2><div style="background: #f5f5f5; padding: 20px; border-radius: 8px;"><h3 style="margin-top: 0;">{{listing_title}}</h3><p><strong>Status:</strong> {{listing_status}}</p><p><strong>Submitted:</strong> {{listing_date}}</p></div><p style="margin-top: 20px;"><a href="{{admin_link}}" style="background: #95160c; color: #fff; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Full Listing in Admin</a></p></div>'),'mlf_email_new_listing',['textarea_name'=>'mlf_email_new_listing','textarea_rows'=>5]); ?>
+            <small style="display:block;margin-top:8px;"><strong>Available placeholders:</strong> <code>{{listing_title}}</code>, <code>{{listing_id}}</code>, <code>{{listing_status}}</code>, <code>{{listing_date}}</code>, <code>{{admin_link}}</code>, <code>{{key_details}}</code></small>
         </div>
         
         <div class="mlf-form-group">
