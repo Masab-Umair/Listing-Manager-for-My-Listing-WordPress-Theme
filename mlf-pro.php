@@ -2,7 +2,7 @@
 /*
 Plugin Name: Listing Manager Pro
 Description: A powerful WordPress plugin that allows you to create and manage listings with ease.
-Version: 4.5
+Version: 4.6
 Author: Masab
 Author URI: https://masab.vercel.app
 */

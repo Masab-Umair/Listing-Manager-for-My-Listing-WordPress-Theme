@@ -10,22 +10,6 @@ function mlf_get_field_definitions() {
         $config = json_decode(file_get_contents($config_file), true);
         if (isset($config['fields']['used'])) {
             foreach ($config['fields']['used'] as $slug => $field) {
-                $options = $field['options'] ?? [];
-                
-                if (($field['type'] ?? '') === 'term-select' && !empty($field['taxonomy']) && taxonomy_exists($field['taxonomy'])) {
-                    $terms = get_terms([
-                        'taxonomy' => $field['taxonomy'],
-                        'hide_empty' => false,
-                    ]);
-                    
-                    if (!is_wp_error($terms)) {
-                        $options = [];
-                        foreach ($terms as $term) {
-                            $options[$term->name] = $term->name;
-                        }
-                    }
-                }
-                
                 $fields[$slug] = [
                     'slug' => $field['slug'] ?? $slug,
                     'type' => $field['type'] ?? 'text',
@@ -34,8 +18,7 @@ function mlf_get_field_definitions() {
                     'description' => $field['description'] ?? '',
                     'placeholder' => $field['placeholder'] ?? '',
                     'required' => $field['required'] ?? false,
-                    'options' => $options,
-                    'taxonomy' => $field['taxonomy'] ?? '',
+                    'options' => $field['options'] ?? [],
                     'terms-template' => $field['terms-template'] ?? '',
                     'multiple' => $field['multiple'] ?? false,
                 ];
@@ -85,117 +68,6 @@ function mlf_get_field_sections() {
     }
     
     return $sections;
-}
-
-function mlf_get_edit_field_values($post_id, $meta, $field_definitions, $meta_array) {
-    $edit_values = $meta_array;
-    
-    foreach ($field_definitions as $slug => $field) {
-        $type = $field['type'] ?? '';
-        
-        if ($type === 'term-select' && !empty($field['taxonomy']) && taxonomy_exists($field['taxonomy'])) {
-            $terms = get_the_terms($post_id, $field['taxonomy']);
-            if (!is_wp_error($terms) && !empty($terms)) {
-                $edit_values[$slug] = array_map(function($term) {
-                    return $term->name;
-                }, $terms);
-            }
-            continue;
-        }
-        
-        if ($slug === 'work_hours' && isset($meta[$slug][0])) {
-            $value = maybe_unserialize($meta[$slug][0]);
-            if (is_array($value)) {
-                $edit_values[$slug] = $value;
-            }
-        }
-    }
-    
-    return $edit_values;
-}
-
-function mlf_is_work_hours_field($key, $field = []) {
-    $type = isset($field['type']) ? $field['type'] : '';
-    $slug = isset($field['slug']) ? $field['slug'] : $key;
-
-    $normalize = function($value) {
-        return strtolower(str_replace(['-', '_'], '', (string) $value));
-    };
-
-    $work_hours_names = ['workhours', 'hours'];
-
-    return in_array($normalize($key), $work_hours_names, true)
-        || in_array($normalize($slug), $work_hours_names, true)
-        || in_array($normalize($type), $work_hours_names, true);
-}
-
-function mlf_get_mylisting_work_hours_template_path() {
-    $template_candidates = [
-        'templates/add-listing/form-fields/work-hours-field.php',
-        'templates/add-listing/form-fields/work_hours-field.php',
-        'templates/form-fields/work-hours-field.php',
-        'work-hours-field.php',
-    ];
-
-    if (function_exists('locate_template')) {
-        $located = locate_template($template_candidates, false, false);
-        if (!empty($located)) {
-            return $located;
-        }
-    }
-
-    $fallback_paths = [
-        MLF_PATH . 'templates/work-hours-field.php',
-        WP_PLUGIN_DIR . '/my-listing/templates/add-listing/form-fields/work-hours-field.php',
-        WP_PLUGIN_DIR . '/mylisting/templates/add-listing/form-fields/work-hours-field.php',
-        get_template_directory() . '/templates/add-listing/form-fields/work-hours-field.php',
-        get_stylesheet_directory() . '/templates/add-listing/form-fields/work-hours-field.php',
-    ];
-
-    foreach ($fallback_paths as $path) {
-        if (file_exists($path)) {
-            return $path;
-        }
-    }
-
-    return '';
-}
-
-function mlf_render_work_hours_field($value, $key = 'work_hours', $field = []) {
-    if (is_string($value)) {
-        $decoded = maybe_unserialize($value);
-        if ($decoded === $value) {
-            $json_decoded = json_decode($value, true);
-            if (json_last_error() === JSON_ERROR_NONE) {
-                $decoded = $json_decoded;
-            }
-        }
-        $value = $decoded;
-    }
-
-    if (!is_array($value) || empty($value)) {
-        return '';
-    }
-
-    if (!class_exists('MyListing\Src\Work_Hours')) {
-        return '';
-    }
-
-    $field = array_merge($field, [
-        'name' => $field['name'] ?? $key,
-        'slug' => $field['slug'] ?? $key,
-        'type' => $field['type'] ?? 'work-hours',
-        'value' => $value,
-    ]);
-
-    $template_path = mlf_get_mylisting_work_hours_template_path();
-    if (empty($template_path)) {
-        return '';
-    }
-
-    ob_start();
-    include $template_path;
-    return ob_get_clean();
 }
 
 // Helper function to make URLs clickable
@@ -382,12 +254,6 @@ class MLF_Dashboard {
             if (empty($value) && $value !== '0' && $value !== 0) {
                 return $value;
             }
-
-            $field_definitions = mlf_get_field_definitions();
-            $field = isset($field_definitions[$key]) ? $field_definitions[$key] : [];
-            if ($key && mlf_is_work_hours_field($key, $field)) {
-                return mlf_render_work_hours_field($value, $key, $field);
-            }
             
             // Convert 0/1 to Yes/No
             if ($value === '1' || $value === 1 || $value === 'true') {
@@ -516,17 +382,15 @@ return implode('<br>', $output);
             if(!in_array($k, ['_edit_lock', '_edit_last'])) {
                 $value = is_array($v) ? $v[0] : $v;
                 // Decode serialized PHP data
-                $meta_array[$k] = mlf_decode_value($value, $k);
+                $meta_array[$k] = mlf_decode_value($value);
             }
         }
         
         $status_class = $post->post_status == 'publish' ? 'publish' : ($post->post_status == 'pending' ? 'pending' : 'draft');
         $status_label = $post->post_status == 'publish' ? 'Published' : ($post->post_status == 'pending' ? 'Pending' : 'Draft');
         
-        // Get field labels/definitions from config as rendering hints.
+        // Get field labels from config as rendering hints.
         $field_labels = mlf_get_field_labels();
-        $field_definitions = mlf_get_field_definitions();
-        $edit_meta = mlf_get_edit_field_values($id, $meta, $field_definitions, $meta_array);
         
         wp_send_json_success([
             'id' => $post->ID,
@@ -536,9 +400,7 @@ return implode('<br>', $output);
             'status_label' => $status_label,
             'date' => get_the_date('F j, Y', $post),
             'meta' => $meta_array,
-            'edit_meta' => $edit_meta,
             'labels' => $field_labels,
-            'fields' => $field_definitions,
             'post_status' => $post->post_status
         ]);
     }
@@ -563,12 +425,6 @@ add_action('wp_ajax_mlf_get_detail', function(){
     function mlf_decode_value($value, $key = '') {
         if (empty($value) && $value !== '0' && $value !== 0) {
             return $value;
-        }
-
-        $field_definitions = mlf_get_field_definitions();
-        $field = isset($field_definitions[$key]) ? $field_definitions[$key] : [];
-        if ($key && mlf_is_work_hours_field($key, $field)) {
-            return mlf_render_work_hours_field($value, $key, $field);
         }
         
         // Convert 0/1 to Yes/No
@@ -766,14 +622,13 @@ add_action('wp_ajax_mlf_get_detail', function(){
             // Skip empty values
             if(!empty($value) && $value !== '') {
                 // Decode serialized PHP data
-                $meta_array[$k] = mlf_decode_value($value, $k);
+                $meta_array[$k] = mlf_decode_value($value);
             }
         }
     }
     
     $field_definitions = mlf_get_field_definitions();
     $field_labels = mlf_get_field_labels();
-    $edit_meta = mlf_get_edit_field_values($id, $meta, $field_definitions, $meta_array);
     
     // Organize fields into the same sections/order as the submission form config.
     $sections = mlf_get_field_sections();
@@ -817,60 +672,9 @@ add_action('wp_ajax_mlf_get_detail', function(){
         'status_label' => $status_label,
         'date' => get_the_date('F j, Y', $post),
         'meta' => $meta_array,
-        'edit_meta' => $edit_meta,
         'sections' => $organized_meta,
-        'fields' => $field_definitions,
         'labels' => $field_labels,
         'post_status' => $post->post_status
     ]);
 });
 
-// Add handler for saving edited data
-add_action('wp_ajax_mlf_save_edit', function(){
-    $id = intval($_POST['id']);
-    
-    if(!$id) {
-        wp_send_json_error('Invalid ID');
-    }
-    
-    $post = get_post($id);
-    if(!$post) {
-        wp_send_json_error('Post not found');
-    }
-    
-    // Update post title if provided
-    if(isset($_POST['job_title']) && !empty($_POST['job_title'])) {
-        wp_update_post([
-            'ID' => $id,
-            'post_title' => sanitize_text_field($_POST['job_title'])
-        ]);
-    }
-    
-    $field_definitions = mlf_get_field_definitions();
-    
-    // Update all meta fields
-    foreach($_POST as $key => $value) {
-        if($key === 'id' || $key === 'action' || $key === 'nonce') continue;
-        
-        // Skip internal WordPress fields
-        if(strpos($key, '_') === 0) continue;
-        
-        if ($key === 'work_hours') {
-            $decoded = json_decode(wp_unslash($value), true);
-            if (is_array($decoded)) {
-                update_post_meta($id, $key, $decoded);
-                continue;
-            }
-        }
-        
-        if (isset($field_definitions[$key]) && ($field_definitions[$key]['type'] ?? '') === 'term-select' && !empty($field_definitions[$key]['taxonomy']) && taxonomy_exists($field_definitions[$key]['taxonomy'])) {
-            $terms = array_filter(array_map('sanitize_text_field', array_map('trim', explode(',', wp_unslash($value)))));
-            wp_set_object_terms($id, $terms, $field_definitions[$key]['taxonomy'], false);
-            continue;
-        }
-        
-        update_post_meta($id, $key, sanitize_text_field($value));
-    }
-    
-    wp_send_json_success('Data saved successfully');
-});
