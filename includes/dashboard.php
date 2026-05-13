@@ -87,6 +87,33 @@ function mlf_get_field_sections() {
     return $sections;
 }
 
+function mlf_get_edit_field_values($post_id, $meta, $field_definitions, $meta_array) {
+    $edit_values = $meta_array;
+    
+    foreach ($field_definitions as $slug => $field) {
+        $type = $field['type'] ?? '';
+        
+        if ($type === 'term-select' && !empty($field['taxonomy']) && taxonomy_exists($field['taxonomy'])) {
+            $terms = get_the_terms($post_id, $field['taxonomy']);
+            if (!is_wp_error($terms) && !empty($terms)) {
+                $edit_values[$slug] = array_map(function($term) {
+                    return $term->name;
+                }, $terms);
+            }
+            continue;
+        }
+        
+        if ($slug === 'work_hours' && isset($meta[$slug][0])) {
+            $value = maybe_unserialize($meta[$slug][0]);
+            if (is_array($value)) {
+                $edit_values[$slug] = $value;
+            }
+        }
+    }
+    
+    return $edit_values;
+}
+
 // Helper function to make URLs clickable
 function mlf_make_links_clickable($text) {
     if (empty($text)) return $text;
@@ -409,6 +436,7 @@ return implode('<br>', $output);
         // Get field labels/definitions from config as rendering hints.
         $field_labels = mlf_get_field_labels();
         $field_definitions = mlf_get_field_definitions();
+        $edit_meta = mlf_get_edit_field_values($id, $meta, $field_definitions, $meta_array);
         
         wp_send_json_success([
             'id' => $post->ID,
@@ -418,6 +446,7 @@ return implode('<br>', $output);
             'status_label' => $status_label,
             'date' => get_the_date('F j, Y', $post),
             'meta' => $meta_array,
+            'edit_meta' => $edit_meta,
             'labels' => $field_labels,
             'fields' => $field_definitions,
             'post_status' => $post->post_status
@@ -648,6 +677,7 @@ add_action('wp_ajax_mlf_get_detail', function(){
     
     $field_definitions = mlf_get_field_definitions();
     $field_labels = mlf_get_field_labels();
+    $edit_meta = mlf_get_edit_field_values($id, $meta, $field_definitions, $meta_array);
     
     // Organize fields into the same sections/order as the submission form config.
     $sections = mlf_get_field_sections();
@@ -691,6 +721,7 @@ add_action('wp_ajax_mlf_get_detail', function(){
         'status_label' => $status_label,
         'date' => get_the_date('F j, Y', $post),
         'meta' => $meta_array,
+        'edit_meta' => $edit_meta,
         'sections' => $organized_meta,
         'fields' => $field_definitions,
         'labels' => $field_labels,
@@ -719,12 +750,28 @@ add_action('wp_ajax_mlf_save_edit', function(){
         ]);
     }
     
+    $field_definitions = mlf_get_field_definitions();
+    
     // Update all meta fields
     foreach($_POST as $key => $value) {
-        if($key === 'id' || $key === 'action') continue;
+        if($key === 'id' || $key === 'action' || $key === 'nonce') continue;
         
         // Skip internal WordPress fields
         if(strpos($key, '_') === 0) continue;
+        
+        if ($key === 'work_hours') {
+            $decoded = json_decode(wp_unslash($value), true);
+            if (is_array($decoded)) {
+                update_post_meta($id, $key, $decoded);
+                continue;
+            }
+        }
+        
+        if (isset($field_definitions[$key]) && ($field_definitions[$key]['type'] ?? '') === 'term-select' && !empty($field_definitions[$key]['taxonomy']) && taxonomy_exists($field_definitions[$key]['taxonomy'])) {
+            $terms = array_filter(array_map('sanitize_text_field', array_map('trim', explode(',', wp_unslash($value)))));
+            wp_set_object_terms($id, $terms, $field_definitions[$key]['taxonomy'], false);
+            continue;
+        }
         
         update_post_meta($id, $key, sanitize_text_field($value));
     }

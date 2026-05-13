@@ -537,6 +537,10 @@ body {
     .mlf-repeatable-row {
         grid-template-columns: 1fr;
     }
+
+    .mlf-work-hours-row {
+        grid-template-columns: 1fr;
+    }
 }
 
 @media (max-width: 576px) {
@@ -816,14 +820,20 @@ body {
 
 .mlf-work-hours-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    grid-template-columns: 1fr;
     gap: 8px;
     margin-top: 10px;
 }
 
+.mlf-work-hours-timezone {
+    display: block;
+    margin-bottom: 12px;
+}
+
 .mlf-work-hours-row {
-    display: flex;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: 120px minmax(160px, 1fr) 120px 120px;
+    align-items: center;
     gap: 8px;
     padding: 8px 10px;
     border: 1px solid #e5e5e5;

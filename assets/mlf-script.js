@@ -199,14 +199,55 @@ function mlfRenderMediaPreview(key, value, multiple) {
 }
 
 function mlfRenderWorkHours(key, value) {
-    var days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-    var lines = typeof value === 'string' ? value.split(/\n|<br\s*\/?>/i) : [];
-    var html = '<textarea name="' + mlfEscapeHtml(key) + '" rows="7" class="mlf-edit-input mlf-work-hours-input">' + mlfEscapeHtml(lines.join('\n')) + '</textarea>';
+    var dayLabels = {
+        monday: 'Monday',
+        tuesday: 'Tuesday',
+        wednesday: 'Wednesday',
+        thursday: 'Thursday',
+        friday: 'Friday',
+        saturday: 'Saturday',
+        sunday: 'Sunday'
+    };
+    var hours = {};
+    
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+        hours = value;
+    }
+    
+    var html = '<input type="hidden" name="' + mlfEscapeHtml(key) + '" value="' + mlfEscapeHtml(JSON.stringify(hours)) + '" data-mlf-work-hours-value>';
+    html += '<div class="mlf-work-hours-editor">';
+    html += '<label class="mlf-work-hours-timezone">Timezone <input type="text" class="mlf-edit-input" data-mlf-work-hours-timezone value="' + mlfEscapeHtml(hours.timezone || '') + '" placeholder="America/Vancouver"></label>';
     html += '<div class="mlf-work-hours-grid">';
-    days.forEach(function(day) {
-        var match = lines.find(function(line) { return line.toLowerCase().indexOf(day.toLowerCase()) === 0; }) || '';
-        html += '<div class="mlf-work-hours-row"><strong>' + day + '</strong><span>' + mlfEscapeHtml(match.replace(new RegExp('^' + day + ':?\\s*', 'i'), '') || 'Not set') + '</span></div>';
+    
+    Object.keys(dayLabels).forEach(function(day) {
+        var dayData = hours[day] || hours[dayLabels[day]] || {};
+        var status = dayData.status || 'closed';
+        if (status === 'open') status = 'enter-hours';
+        
+        var slot = {};
+        if (dayData.hours && dayData.hours.length) {
+            slot = dayData.hours[0] || {};
+        } else {
+            slot = dayData;
+        }
+        
+        html += '<div class="mlf-work-hours-row" data-mlf-work-hours-day="' + day + '">';
+        html += '<strong>' + dayLabels[day] + '</strong>';
+        html += '<select class="mlf-edit-input" data-mlf-work-hours-status>';
+        [
+            { value: 'enter-hours', label: 'Enter Hours' },
+            { value: 'by-appointment-only', label: 'By Appointment Only' },
+            { value: 'closed', label: 'Closed' }
+        ].forEach(function(option) {
+            html += '<option value="' + option.value + '"' + (status === option.value ? ' selected' : '') + '>' + option.label + '</option>';
+        });
+        html += '</select>';
+        html += '<input type="time" class="mlf-edit-input" data-mlf-work-hours-from value="' + mlfEscapeHtml(slot.from || '') + '">';
+        html += '<input type="time" class="mlf-edit-input" data-mlf-work-hours-to value="' + mlfEscapeHtml(slot.to || '') + '">';
+        html += '</div>';
     });
+    
+    html += '</div>';
     html += '</div>';
     return html;
 }
@@ -520,7 +561,7 @@ function mlfRenderEditField(key, field, value) {
                 if (response.success) {
                     var data = response.data;
                     var fields = data.fields || {};
-                    var meta = data.meta || {};
+                    var meta = data.edit_meta || data.meta || {};
 
                     var html = '<div class="mlf-back-btn" onclick="mlfOpenDetail(' + id + ')">&#8592; Back to details</div>';
                     html += '<form id="mlf-edit-form">';
@@ -537,11 +578,6 @@ function mlfRenderEditField(key, field, value) {
 
                         var value = key === 'job_title' ? data.title : (meta[key] || '');
                         html += mlfRenderEditField(key, field, value);
-                    });
-
-                    Object.keys(meta).forEach(function(key) {
-                        if (fields[key] || key === '_edit_lock' || key === '_edit_last') return;
-                        html += mlfRenderEditField(key, { type: 'text', label: key.replace(/-/g, ' ').replace(/_/g, ' ').replace(/\b\w/g, function(l) { return l.toUpperCase(); }) }, meta[key] || '');
                     });
 
                     html += '<div class="mlf-edit-actions">';
@@ -583,13 +619,35 @@ function mlfRenderEditField(key, field, value) {
             });
             $(this).val(items.join(', '));
         });
+
+        $(form).find('[data-mlf-work-hours-value]').each(function() {
+            var wrapper = $(this).siblings('.mlf-work-hours-editor');
+            var value = {
+                timezone: $.trim(wrapper.find('[data-mlf-work-hours-timezone]').val() || '')
+            };
+            
+            wrapper.find('[data-mlf-work-hours-day]').each(function() {
+                var row = $(this);
+                var day = row.data('mlf-work-hours-day');
+                var status = row.find('[data-mlf-work-hours-status]').val() || 'closed';
+                var from = row.find('[data-mlf-work-hours-from]').val() || '';
+                var to = row.find('[data-mlf-work-hours-to]').val() || '';
+                
+                value[day] = {
+                    status: status,
+                    hours: status === 'enter-hours' && (from || to) ? [{ from: from, to: to }] : []
+                };
+            });
+            
+            $(this).val(JSON.stringify(value));
+        });
     }
 
-    $(document).on('change', '#mlf-edit-form [data-mlf-multi-select], #mlf-edit-form [data-mlf-check-option]', function() {
+    $(document).on('change', '#mlf-edit-form [data-mlf-multi-select], #mlf-edit-form [data-mlf-check-option], #mlf-edit-form [data-mlf-work-hours-status], #mlf-edit-form [data-mlf-work-hours-from], #mlf-edit-form [data-mlf-work-hours-to]', function() {
         mlfSyncStructuredEditFields(document.getElementById('mlf-edit-form'));
     });
 
-    $(document).on('input', '#mlf-edit-form [data-mlf-link-network], #mlf-edit-form [data-mlf-link-url]', function() {
+    $(document).on('input', '#mlf-edit-form [data-mlf-link-network], #mlf-edit-form [data-mlf-link-url], #mlf-edit-form [data-mlf-work-hours-timezone]', function() {
         mlfSyncStructuredEditFields(document.getElementById('mlf-edit-form'));
     });
 
