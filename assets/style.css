@@ -533,6 +533,10 @@ body {
         width: 100%;
         text-align: center;
     }
+
+    .mlf-repeatable-row {
+        grid-template-columns: 1fr;
+    }
 }
 
 @media (max-width: 576px) {
@@ -701,6 +705,18 @@ body {
 }
 
 /* Edit Form Styles */
+.mlf-edit-section-heading {
+    margin: 28px 0 18px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--mlf-primary-color, #95160c);
+}
+
+.mlf-edit-section-heading h4 {
+    margin: 0;
+    color: var(--mlf-primary-color, #95160c);
+    font-size: 18px;
+}
+
 .mlf-edit-field {
     margin-bottom: 20px;
 }
@@ -735,6 +751,84 @@ body {
 .mlf-edit-field textarea {
     min-height: 100px;
     resize: vertical;
+}
+
+.mlf-field-description {
+    margin: -2px 0 8px;
+    color: #666;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.mlf-choice-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.mlf-choice {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background: #fff;
+    font-weight: 500;
+}
+
+.mlf-media-preview {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+}
+
+.mlf-edit-preview-image {
+    width: 96px;
+    height: 96px;
+    border-radius: 8px;
+    object-fit: cover;
+    border: 1px solid #ddd;
+}
+
+.mlf-repeatable-list {
+    display: grid;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.mlf-repeatable-row {
+    display: grid;
+    grid-template-columns: minmax(110px, 0.8fr) minmax(160px, 1.5fr) auto;
+    gap: 8px;
+    align-items: center;
+}
+
+.mlf-small-btn {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background: #fff;
+    padding: 10px 12px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.mlf-work-hours-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.mlf-work-hours-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid #e5e5e5;
+    border-radius: 8px;
+    background: #fff;
 }
 
 .mlf-edit-actions {

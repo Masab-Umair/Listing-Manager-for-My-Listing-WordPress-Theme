@@ -108,6 +108,204 @@ function mlfRenderValue(key, value) {
     return html;
 }
 
+function mlfEscapeHtml(value) {
+    return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function mlfNormalizeListValue(value) {
+    if (Array.isArray(value)) return value.map(String);
+    if (value == null || value === '') return [];
+    return String(value).split(/,\s*|\n/).map(function(item) {
+        return item.trim();
+    }).filter(Boolean);
+}
+
+function mlfOptionsToArray(options) {
+    if (!options) return [];
+    if (Array.isArray(options)) return options.map(function(option) {
+        if (typeof option === 'object') {
+            return {
+                value: option.value || option.key || option.label || '',
+                label: option.label || option.value || option.key || ''
+            };
+        }
+        return { value: option, label: option };
+    });
+    return Object.keys(options).map(function(key) {
+        return { value: key, label: options[key] };
+    });
+}
+
+function mlfFieldType(field) {
+    var type = (field && field.type ? field.type : 'text').toLowerCase();
+    if (type === 'texteditor' || type === 'wp-editor' || type === 'paragraph') return 'textarea';
+    if (type === 'term-select') {
+        return field && (field['terms-template'] === 'checklist') ? 'checkbox' : 'multiselect';
+    }
+    if (type === 'fileupload') return 'file';
+    if (type === 'work-hours') return 'work-hours';
+    if (type === 'links') return 'links';
+    if (type === 'related-listing') return 'text';
+    return type;
+}
+
+function mlfRenderMediaPreview(key, value, multiple) {
+    var values = mlfNormalizeListValue(value);
+    var preview = '';
+    values.forEach(function(item) {
+        if (/\.(jpg|jpeg|png|webp|gif|svg)(\?.*)?$/i.test(item) || /wp-content\/uploads/i.test(item)) {
+            preview += '<img src="' + mlfEscapeHtml(item) + '" alt="" class="mlf-edit-preview-image">';
+        } else if (item) {
+            preview += '<a href="' + mlfEscapeHtml(item) + '" target="_blank" rel="noopener noreferrer">' + mlfEscapeHtml(item) + '</a>';
+        }
+    });
+
+    if (multiple) {
+        return '<div class="mlf-media-preview">' + preview + '</div>' +
+            '<textarea name="' + mlfEscapeHtml(key) + '" rows="3" class="mlf-edit-input">' + mlfEscapeHtml(values.join('\n')) + '</textarea>';
+    }
+
+    return '<div class="mlf-media-preview">' + preview + '</div>' +
+        '<input type="url" name="' + mlfEscapeHtml(key) + '" value="' + mlfEscapeHtml(values[0] || value || '') + '" class="mlf-edit-input">';
+}
+
+function mlfRenderWorkHours(key, value) {
+    var days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    var lines = typeof value === 'string' ? value.split(/\n|<br\s*\/?>/i) : [];
+    var html = '<textarea name="' + mlfEscapeHtml(key) + '" rows="7" class="mlf-edit-input mlf-work-hours-input">' + mlfEscapeHtml(lines.join('\n')) + '</textarea>';
+    html += '<div class="mlf-work-hours-grid">';
+    days.forEach(function(day) {
+        var match = lines.find(function(line) { return line.toLowerCase().indexOf(day.toLowerCase()) === 0; }) || '';
+        html += '<div class="mlf-work-hours-row"><strong>' + day + '</strong><span>' + mlfEscapeHtml(match.replace(new RegExp('^' + day + ':?\\s*', 'i'), '') || 'Not set') + '</span></div>';
+    });
+    html += '</div>';
+    return html;
+}
+
+function mlfRenderLinksField(key, value) {
+    var values = mlfNormalizeListValue(value);
+    if (!values.length) values = [''];
+    var html = '<input type="hidden" name="' + mlfEscapeHtml(key) + '" value="' + mlfEscapeHtml(values.join(', ')) + '" data-mlf-links-value>';
+    html += '<div class="mlf-repeatable-list" data-mlf-links-list>';
+    values.forEach(function(item) {
+        var network = '';
+        var url = item;
+        if (/^[a-z0-9_-]+:/i.test(item) && !/^https?:\/\//i.test(item)) {
+            var parts = item.split(':');
+            network = parts.shift();
+            url = parts.join(':');
+        }
+        html += '<div class="mlf-repeatable-row">' +
+            '<input type="text" value="' + mlfEscapeHtml(network) + '" placeholder="Network" data-mlf-link-network class="mlf-edit-input">' +
+            '<input type="url" value="' + mlfEscapeHtml(url) + '" placeholder="URL" data-mlf-link-url class="mlf-edit-input">' +
+            '<button type="button" class="mlf-small-btn" data-mlf-remove-row>Remove</button>' +
+            '</div>';
+    });
+    html += '</div><button type="button" class="mlf-small-btn" data-mlf-add-link>Add Link</button>';
+    return html;
+}
+
+function mlfRenderEditField(key, field, value) {
+    var type = mlfFieldType(field);
+    var label = field.label || key.replace(/-/g, ' ').replace(/_/g, ' ').replace(/\b\w/g, function(l) { return l.toUpperCase(); });
+    var description = field.description ? '<p class="mlf-field-description">' + mlfEscapeHtml(field.description) + '</p>' : '';
+    var required = field.required ? ' required' : '';
+    var placeholder = field.placeholder ? ' placeholder="' + mlfEscapeHtml(field.placeholder) + '"' : '';
+    var options = mlfOptionsToArray(field.options);
+    var values = mlfNormalizeListValue(value);
+    var html = '<div class="mlf-edit-field mlf-field-type-' + mlfEscapeHtml(type) + '"><label>' + mlfEscapeHtml(label) + '</label>' + description;
+
+    if (key === 'job_title') {
+        return html + '<input type="text" name="job_title" value="' + mlfEscapeHtml(value) + '" class="mlf-edit-input"' + required + placeholder + '></div>';
+    }
+
+    switch (type) {
+        case 'email':
+            html += '<input type="email" name="' + mlfEscapeHtml(key) + '" value="' + mlfEscapeHtml(value) + '" class="mlf-edit-input"' + required + placeholder + '>';
+            break;
+        case 'url':
+        case 'link':
+            html += '<input type="url" name="' + mlfEscapeHtml(key) + '" value="' + mlfEscapeHtml(value) + '" class="mlf-edit-input"' + required + placeholder + '>';
+            break;
+        case 'number':
+            html += '<input type="number" name="' + mlfEscapeHtml(key) + '" value="' + mlfEscapeHtml(value) + '" class="mlf-edit-input"' + required + placeholder + '>';
+            break;
+        case 'textarea':
+            html += '<textarea name="' + mlfEscapeHtml(key) + '" rows="5" class="mlf-edit-input"' + required + placeholder + '>' + mlfEscapeHtml(value) + '</textarea>';
+            break;
+        case 'select':
+            html += '<select name="' + mlfEscapeHtml(key) + '" class="mlf-edit-input"' + required + '><option value=""></option>';
+            options.forEach(function(option) {
+                var selected = String(value) === String(option.value) ? ' selected' : '';
+                html += '<option value="' + mlfEscapeHtml(option.value) + '"' + selected + '>' + mlfEscapeHtml(option.label) + '</option>';
+            });
+            html += '</select>';
+            break;
+        case 'multiselect':
+            html += '<input type="hidden" name="' + mlfEscapeHtml(key) + '" value="' + mlfEscapeHtml(values.join(', ')) + '" data-mlf-multi-value>';
+            html += '<select multiple class="mlf-edit-input" data-mlf-multi-select' + required + '>';
+            options.forEach(function(option) {
+                var selected = values.indexOf(String(option.value)) > -1 || values.indexOf(String(option.label)) > -1 ? ' selected' : '';
+                html += '<option value="' + mlfEscapeHtml(option.value) + '"' + selected + '>' + mlfEscapeHtml(option.label) + '</option>';
+            });
+            if (!options.length && values.length) {
+                values.forEach(function(item) {
+                    html += '<option value="' + mlfEscapeHtml(item) + '" selected>' + mlfEscapeHtml(item) + '</option>';
+                });
+            }
+            html += '</select>';
+            break;
+        case 'checkbox':
+            html += '<input type="hidden" name="' + mlfEscapeHtml(key) + '" value="' + mlfEscapeHtml(values.join(', ')) + '" data-mlf-check-value>';
+            html += '<div class="mlf-choice-group">';
+            if (!options.length && values.length) {
+                options = values.map(function(item) { return { value: item, label: item }; });
+            }
+            options.forEach(function(option) {
+                var checked = values.indexOf(String(option.value)) > -1 || values.indexOf(String(option.label)) > -1 ? ' checked' : '';
+                html += '<label class="mlf-choice"><input type="checkbox" value="' + mlfEscapeHtml(option.value) + '"' + checked + ' data-mlf-check-option> ' + mlfEscapeHtml(option.label) + '</label>';
+            });
+            html += '</div>';
+            break;
+        case 'radio':
+        case 'boolean':
+            html += '<div class="mlf-choice-group">';
+            (options.length ? options : [{value: 'Yes', label: 'Yes'}, {value: 'No', label: 'No'}]).forEach(function(option) {
+                var checked = String(value) === String(option.value) || String(value) === String(option.label) ? ' checked' : '';
+                html += '<label class="mlf-choice"><input type="radio" name="' + mlfEscapeHtml(key) + '" value="' + mlfEscapeHtml(option.value) + '"' + checked + '> ' + mlfEscapeHtml(option.label) + '</label>';
+            });
+            html += '</div>';
+            break;
+        case 'file':
+        case 'image':
+            html += mlfRenderMediaPreview(key, value, field.multiple || key === 'job_gallery');
+            break;
+        case 'gallery':
+            html += mlfRenderMediaPreview(key, value, true);
+            break;
+        case 'links':
+            html += mlfRenderLinksField(key, value);
+            break;
+        case 'location':
+        case 'map':
+            html += '<input type="text" name="' + mlfEscapeHtml(key) + '" value="' + mlfEscapeHtml(value) + '" class="mlf-edit-input mlf-location-input"' + required + placeholder + '>';
+            break;
+        case 'work-hours':
+            html += mlfRenderWorkHours(key, value);
+            break;
+        default:
+            html += '<input type="text" name="' + mlfEscapeHtml(key) + '" value="' + mlfEscapeHtml(value) + '" class="mlf-edit-input"' + required + placeholder + '>';
+            break;
+    }
+
+    return html + '</div>';
+}
+
 (function($) {
     'use strict';
 
@@ -296,41 +494,31 @@ function mlfRenderValue(key, value) {
             },
             success: function(response) {
                 if (response.success) {
-                    var data   = response.data;
-                    var labels = data.labels || {};
+                    var data = response.data;
+                    var fields = data.fields || {};
+                    var meta = data.meta || {};
 
                     var html = '<div class="mlf-back-btn" onclick="mlfOpenDetail(' + id + ')">&#8592; Back to details</div>';
                     html += '<form id="mlf-edit-form">';
                     html += '<input type="hidden" name="id" value="' + id + '">';
 
-                    var longKeys = ['description','bio','why','focus','idea','collaboration',
-                        'influence','awards','content','services','year','initial-appointment',
-                        'follow-up','3rd-party','online-booking','confidentiality','waiting-list',
-                        'one','two','three','four','five'];
-
-                    for (var key in data.meta) {
-                        if (key === '_edit_lock' || key === '_edit_last') continue;
-
-                        var value = data.meta[key] || '';
-                        var label = labels[key] || key.replace(/-/g, ' ').replace(/_/g, ' ').replace(/\b\w/g, function(l) { return l.toUpperCase(); });
-                        var isLong = longKeys.some(function(t) { return key.indexOf(t) > -1; });
-
-                        html += '<div class="mlf-edit-field"><label>' + label + '</label>';
-
-                        if (isLong) {
-                            html += '<textarea name="' + key + '" rows="4">' + value + '</textarea>';
-                        } else if (key.indexOf('email') > -1) {
-                            html += '<input type="email" name="' + key + '" value="' + value.replace(/"/g, '&quot;') + '" class="mlf-edit-input">';
-                        } else if (key.indexOf('phone') > -1) {
-                            html += '<input type="tel" name="' + key + '" value="' + value.replace(/"/g, '&quot;') + '" class="mlf-edit-input">';
-                        } else if (key.indexOf('url') > -1 || key === 'job_website') {
-                            html += '<input type="url" name="' + key + '" value="' + value.replace(/"/g, '&quot;') + '" class="mlf-edit-input">';
-                        } else {
-                            html += '<input type="text" name="' + key + '" value="' + value.replace(/"/g, '&quot;') + '" class="mlf-edit-input">';
+                    Object.keys(fields).sort(function(a, b) {
+                        return (parseInt(fields[a].priority || 0, 10) - parseInt(fields[b].priority || 0, 10));
+                    }).forEach(function(key) {
+                        var field = fields[key] || {};
+                        if (field.type === 'form-heading') {
+                            html += '<div class="mlf-edit-section-heading"><h4>' + mlfEscapeHtml(field.label || key) + '</h4></div>';
+                            return;
                         }
 
-                        html += '</div>';
-                    }
+                        var value = key === 'job_title' ? data.title : (meta[key] || '');
+                        html += mlfRenderEditField(key, field, value);
+                    });
+
+                    Object.keys(meta).forEach(function(key) {
+                        if (fields[key] || key === '_edit_lock' || key === '_edit_last') return;
+                        html += mlfRenderEditField(key, { type: 'text', label: key.replace(/-/g, ' ').replace(/_/g, ' ').replace(/\b\w/g, function(l) { return l.toUpperCase(); }) }, meta[key] || '');
+                    });
 
                     html += '<div class="mlf-edit-actions">';
                     html += '<button type="button" class="mlf-btn mlf-btn-success" onclick="mlfSaveEdit(' + id + ')">&#128190; Save Changes</button>';
@@ -344,8 +532,57 @@ function mlfRenderValue(key, value) {
     };
 
     // ─── Save Edited Data ─────────────────────────────────────────────────────────
+    function mlfSyncStructuredEditFields(form) {
+        if (!form) return;
+
+        $(form).find('[data-mlf-multi-value]').each(function() {
+            var selected = $(this).siblings('[data-mlf-multi-select]').val() || [];
+            $(this).val(selected.join(', '));
+        });
+
+        $(form).find('[data-mlf-check-value]').each(function() {
+            var checked = [];
+            $(this).siblings('.mlf-choice-group').find('[data-mlf-check-option]:checked').each(function() {
+                checked.push($(this).val());
+            });
+            $(this).val(checked.join(', '));
+        });
+
+        $(form).find('[data-mlf-links-value]').each(function() {
+            var items = [];
+            $(this).siblings('[data-mlf-links-list]').find('.mlf-repeatable-row').each(function() {
+                var network = $.trim($(this).find('[data-mlf-link-network]').val() || '');
+                var url = $.trim($(this).find('[data-mlf-link-url]').val() || '');
+                if (network || url) {
+                    items.push(network ? network + ':' + url : url);
+                }
+            });
+            $(this).val(items.join(', '));
+        });
+    }
+
+    $(document).on('change', '#mlf-edit-form [data-mlf-multi-select], #mlf-edit-form [data-mlf-check-option]', function() {
+        mlfSyncStructuredEditFields(document.getElementById('mlf-edit-form'));
+    });
+
+    $(document).on('input', '#mlf-edit-form [data-mlf-link-network], #mlf-edit-form [data-mlf-link-url]', function() {
+        mlfSyncStructuredEditFields(document.getElementById('mlf-edit-form'));
+    });
+
+    $(document).on('click', '#mlf-edit-form [data-mlf-add-link]', function() {
+        var list = $(this).siblings('[data-mlf-links-list]');
+        list.append('<div class="mlf-repeatable-row"><input type="text" value="" placeholder="Network" data-mlf-link-network class="mlf-edit-input"><input type="url" value="" placeholder="URL" data-mlf-link-url class="mlf-edit-input"><button type="button" class="mlf-small-btn" data-mlf-remove-row>Remove</button></div>');
+    });
+
+    $(document).on('click', '#mlf-edit-form [data-mlf-remove-row]', function() {
+        var form = document.getElementById('mlf-edit-form');
+        $(this).closest('.mlf-repeatable-row').remove();
+        mlfSyncStructuredEditFields(form);
+    });
+
     window.mlfSaveEdit = function(id) {
         var form     = document.getElementById('mlf-edit-form');
+        mlfSyncStructuredEditFields(form);
         var formData = new FormData(form);
         formData.append('action', 'mlf_save_edit');
         formData.append('id', id);

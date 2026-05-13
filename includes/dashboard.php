@@ -1,23 +1,73 @@
 <?php
 if (!defined('ABSPATH')) exit;
 
-// Load config file and create label mapping
-function mlf_get_field_labels() {
+// Load config file as a field-definition reference only.
+function mlf_get_field_definitions() {
     $config_file = plugin_dir_path(__FILE__) . '../healthcare-practionner.30-04.config.json';
-    $labels = [];
+    $fields = [];
     
     if (file_exists($config_file)) {
         $config = json_decode(file_get_contents($config_file), true);
         if (isset($config['fields']['used'])) {
             foreach ($config['fields']['used'] as $slug => $field) {
-                if (isset($field['label'])) {
-                    $labels[$slug] = $field['label'];
-                }
+                $fields[$slug] = [
+                    'slug' => $field['slug'] ?? $slug,
+                    'type' => $field['type'] ?? 'text',
+                    'label' => $field['label'] ?? $slug,
+                    'priority' => $field['priority'] ?? 0,
+                    'description' => $field['description'] ?? '',
+                    'placeholder' => $field['placeholder'] ?? '',
+                    'required' => $field['required'] ?? false,
+                    'options' => $field['options'] ?? [],
+                    'terms-template' => $field['terms-template'] ?? '',
+                    'multiple' => $field['multiple'] ?? false,
+                ];
             }
         }
     }
     
+    uasort($fields, function($a, $b) {
+        return intval($a['priority'] ?? 0) <=> intval($b['priority'] ?? 0);
+    });
+    
+    return $fields;
+}
+
+// Load config file and create label mapping
+function mlf_get_field_labels() {
+    $labels = [];
+    
+    foreach (mlf_get_field_definitions() as $slug => $field) {
+        if (isset($field['label'])) {
+            $labels[$slug] = $field['label'];
+        }
+    }
+    
     return $labels;
+}
+
+function mlf_get_field_sections() {
+    $sections = [];
+    $current_section = 'Listing Fields';
+    
+    foreach (mlf_get_field_definitions() as $slug => $field) {
+        $type = $field['type'] ?? '';
+        if ($type === 'form-heading') {
+            $current_section = $field['label'] ?? $slug;
+            if (!isset($sections[$current_section])) {
+                $sections[$current_section] = [];
+            }
+            continue;
+        }
+        
+        if (!isset($sections[$current_section])) {
+            $sections[$current_section] = [];
+        }
+        
+        $sections[$current_section][] = $slug;
+    }
+    
+    return $sections;
 }
 
 // Helper function to make URLs clickable
@@ -339,8 +389,9 @@ return implode('<br>', $output);
         $status_class = $post->post_status == 'publish' ? 'publish' : ($post->post_status == 'pending' ? 'pending' : 'draft');
         $status_label = $post->post_status == 'publish' ? 'Published' : ($post->post_status == 'pending' ? 'Pending' : 'Draft');
         
-        // Get field labels from config
+        // Get field labels/definitions from config as rendering hints.
         $field_labels = mlf_get_field_labels();
+        $field_definitions = mlf_get_field_definitions();
         
         wp_send_json_success([
             'id' => $post->ID,
@@ -351,6 +402,7 @@ return implode('<br>', $output);
             'date' => get_the_date('F j, Y', $post),
             'meta' => $meta_array,
             'labels' => $field_labels,
+            'fields' => $field_definitions,
             'post_status' => $post->post_status
         ]);
     }
@@ -577,18 +629,11 @@ add_action('wp_ajax_mlf_get_detail', function(){
         }
     }
     
-    // Organize fields into sections
-    $sections = [
-        'Contact Information' => ['email', 'job_email', 'phone', 'job_phone', 'complete-address', 'links'],
-        'Professional Details' => ['credentials', 'certifying-body', 'my-liability-insurance-provider-is', 'health-expert-panel', 'advertising', 'my-style-of-practice'],
-        'Healthcare Focus' => ['healthcare-issues-and-approaches', 'placholder-for-accessibility', 'other', 'your-focus', 'idea'],
-        'About Your Practice' => ['basic-information', 'the-why', 'your-collaborations', 'your-influences', 'year', 'formal-bio', 'a-little-more-about-me'],
-        'Experience & Recognition' => ['awards-and-honours', 'peer-references', 'recent-patient-testimonials'],
-        'Availability' => ['form-heading', 'i-offer-the-following-types-of-sessions', 'initial-appointment', 'follow-up-appointments', '3rd-party-insurance', 'online-booking', 'confidentiality', 'waiting-list', 'offerings', 'additional-services', 'services'],
-        'Connections' => ['connections', 'associations'],
-        'Compliance' => ['crimimal-records-check', 'criminal-records-check-received', 'approval-dateinitials', 'date-of-interview'],
-        'Media' => ['podcast-titles-done-with-this-practitioner-for-mynd-myself-admin']
-    ];
+    $field_definitions = mlf_get_field_definitions();
+    $field_labels = mlf_get_field_labels();
+    
+    // Organize fields into the same sections/order as the submission form config.
+    $sections = mlf_get_field_sections();
     
     $organized_meta = [];
     foreach($sections as $section => $keys) {
@@ -630,6 +675,8 @@ add_action('wp_ajax_mlf_get_detail', function(){
         'date' => get_the_date('F j, Y', $post),
         'meta' => $meta_array,
         'sections' => $organized_meta,
+        'fields' => $field_definitions,
+        'labels' => $field_labels,
         'post_status' => $post->post_status
     ]);
 });
